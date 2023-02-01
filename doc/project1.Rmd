@@ -53,8 +53,6 @@ library("readtext")
 library(ggplot2) 
 library("wordcloud2")
 library("manipulateWidget")
-source("../lib/plotstacked.R")
-source("../lib/speechFuncs.R")
 ```
 
 # Introduction
