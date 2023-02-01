@@ -1,0 +1,337 @@
+---
+title: "Project 1"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+fontsize: 12
+always_allow_html: yes
+---
+
+```{r setup,include=FALSE}
+packages.used=c("tm", "wordcloud", "RColorBrewer", "dplyr", "tidytext", "knitr",
+                "tidyverse", "rvest", "tibble", "qdap", 
+                "sentimentr", "gplots", "dplyr",
+                "tm", "syuzhet", "factoextra", 
+                "beeswarm", "scales", "RColorBrewer",
+                "RANN", "tm", "topicmodels","readtext", "ggplot2", "wordcloud2",
+                "manipulateWidget")
+
+# check packages that need to be installed.
+packages.needed=setdiff(packages.used, 
+                        intersect(installed.packages()[,1], 
+                                  packages.used))
+# install additional packages
+if(length(packages.needed)>0){
+  install.packages(packages.needed, dependencies = TRUE)
+}
+
+library(tm)
+library(wordcloud)
+library(RColorBrewer)
+library(dplyr)
+library(tidytext)
+library(knitr)
+library(tidyverse)
+library(rvest)
+library(tibble)
+library(plotly)
+library("rvest")
+library("tibble")
+library("qdap")
+library("sentimentr")
+library("gplots")
+library("dplyr")
+library("syuzhet")
+library("factoextra")
+library("beeswarm")
+library("scales")
+library("RColorBrewer")
+library("RANN")
+library("topicmodels")
+library("readtext")
+library(ggplot2) 
+library("wordcloud2")
+library("manipulateWidget")
+source("../lib/plotstacked.R")
+source("../lib/speechFuncs.R")
+```
+
+# Introduction
+Philisophy is the study of the fundamental nature of knowledge, reality, and existence. Today, I'm going to use the philisophy dataset to analysis the similarities and difference between schools. I'm going to take three different approaches in this blog. 
+
+* Which school is more popular in what stages of time 
+* Ideas and focus of schools 
+* Emtional aspect of schools
+
+# Understanding Features and Varaibles in data
+
+In the Philiosophy Data set, we have 360808 records of data, each record constains 9 features: title, author, school, sentence_spacy, and sentence_str, original_publication_date,corpus_edition_date, sentence_length, and sentence_lowered. Each record represents a famous philosophy quote from 13 schools: plato, aristotle, empiricism, rationalism, analytic, continental, phenomenology, german_idealism, communism, capitalism, stoicism, nietzsche, and feminism. And each those qutoes came from 36 different authors. 
+
+```{r,include=FALSE}
+df = read.csv("../data/philosophy_data.csv")
+```
+
+Data Preview: 
+```{r, echo=FALSE}
+head(df)
+```
+A summary of all features:
+```{r, echo=FALSE}
+# summary informations of dataset
+summary(df)
+```
+
+Schools:
+```{r,echo=FALSE}
+# show unique value of schools
+unique(df$school)
+```
+
+Authors:
+```{r, echo=FALSE}
+# show unique value of author
+unique(df$author)
+```
+
+
+# Data analysis - Publication date
+
+In this step we are going to first look at the distribution of data, when did the quotes in the dataset are being published, who and which school wrote the most quotes
+
+The dataset contains quote's original publication date, and we can tell from the histogram, most quotes included in this data set are from 17-21th century and 350-320 B.C.
+
+```{r, echo = FALSE}
+knitr::opts_chunk$set(fig.width=unit(15,"cm"), fig.height=unit(15,"cm"))
+hist(df$original_publication_date, xlab="publication date", ylab="number of quotes", main = "publication date histogram")
+```
+
+The distribution of number of quotes published by each school contained in the dataset are show below: 
+
+The different schools also are more popular during the different time periods. Plato's school is the most popular and had the most quotes in 350 B.C., followed by Aristotle in -320 B.C, while nowadays more quotes are from analytic school. From this chart, we can see the focus of philosophy schools in different eras and how history tied closely with this chart of philosophy quotes. For example, feminist quotes are mostly published around 1949, where in that time period, the Women's Right movement arose in all parts of the world (ex. women's rights movement in the United States occurred around 1921-1979). Another example is that as the Industrial Revolution advanced in Europe around the 19th century, communism grew out of the socialist movement in the 19th century, and communist states such as the Soviet Union developed. 
+
+```{r, echo = FALSE}
+knitr::opts_chunk$set(fig.width=unit(10,"cm"), fig.height=unit(10,"cm"))
+df%>% 
+  group_by(school,original_publication_date)%>%
+  count(school,original_publication_date)%>%
+  ggplot(data=.,aes(x=as.factor(original_publication_date),y=n, fill = as.factor(school)))+
+    geom_bar(stat="identity")+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+    labs(title = "Quotes Count vs. Time", fill = "School")+
+    ylab("Quotes Count") +
+    xlab("publication date")
+```
+
+# Data Processing
+
+In the next couple stages, we are going to look at the ideas and emotions of different philisophy schools. Since the dataset are too large, I'm going to randomly sample 1000 quotes from each school (13000 qutoes in total) for further processing. 
+```{r, echo = FALSE}
+set.seed(123)
+sampled <- df %>% group_by(school) %>% slice_sample(n=1000)
+```
+
+After sampled, I'll generate two new dataset using the sample generated: 
+
+* generate emotional data with eight basic emotions (anger, fear, anticipation, trust, surprise, sadness, joy, and disgust) and two sentiments (negative and positive) that is associated with word in each quote. 
+
+* generate a corpus of words for different school after data clean-up (map to lower case, remove numbers, puncuations, extra whitespaces, and stop words) for furthure visualizing a word cloud of ideas focus of each school. 
+```{r, echo = FALSE, warning = FALSE}
+sentence.list<-NULL
+for(i in 1:nrow(sampled)){
+  sentences<-sampled[i,]$sentence_str
+  if(length(sentences)>0){
+    emotions<-get_nrc_sentiment(as.character(strsplit(sentences," ")), language = 'english', lowercase = FALSE)
+    sentence.list=rbind(sentence.list, 
+                        cbind(sampled[i,-5],
+                              sentences=as.character(sentences), 
+                              emotions
+                        )
+    )
+  }
+}
+```
+
+```{r, echo=FALSE}
+get_word_cloud <- function(df,school){
+  # generate text string for each school, to lower case
+  world_cloud_by_school <- df[df$school == school,]
+  world_cloud_by_school <- str_c(world_cloud_by_school$sentence_lowered, collapse = " ")
+  # load into a corpus
+  word_corpus <- Corpus(VectorSource(world_cloud_by_school))
+  # remove all numbers, punctuations, extra whitespaces, ans stop words
+  word_corpus <- word_corpus %>%
+    tm_map(removeNumbers) %>%
+    tm_map(removePunctuation) %>%
+    tm_map(stripWhitespace) %>% 
+    tm_map(removeWords, stopwords("english")) %>% 
+    tm_map(stemDocument)
+
+  tmx <- TermDocumentMatrix(word_corpus)
+  matrix <- as.matrix(tmx)
+  words <- sort(rowSums(matrix), decreasing=TRUE)
+  word_cloud_df <- data.frame(word = names(words),freq=words)
+
+  graph <- wordcloud2(data = word_cloud_df, color =  "skyblue", size = 1)
+  return(graph)
+  }
+```
+# Data analysis - Main Idea of each school (Word cloud)
+
+## Feminism
+Feminism address such as the body, class and work, disability, the family, reproduction, the self, sex work, human trafficking, and sexuality. We can see that the most frequent word is women/woman,  mother, lift, black, and work. Illisutring the ideas of balancing the life of women and a wish the achieve full gender equality. 
+
+```{r, warning=FALSE, echo = FALSE}
+graph = get_word_cloud(sampled, "feminism")
+combineWidgets(graph, width = '15cm', height='15cm')
+```
+
+## Empiricism
+Empiricism is the idea that all learning comes from only experience and observations. The top frequent words are 'idea', 'will', 'can', 'make'. The word 'make' stood out for empiricim but not other schools, symbolized the experimental ideas of Empiricism. 
+
+```{r, warning=FALSE, echo = FALSE}
+graph = get_word_cloud(sampled, "empiricism")
+combineWidgets(graph, width = '15cm', height='15cm')
+```
+
+## Capitalism
+The top frequent word for capitalism is: "price", "labour", "employ", "countri", and "canpart" which shapes the idea of private ownership, production, the motive to make a profit.
+
+```{r, warning=FALSE, echo = FALSE}
+graph = get_word_cloud(sampled, "capitalism")
+combineWidgets(graph, width = '15cm', height='15cm')
+```
+
+## German idealism
+The top frequent word for German idealism is: "one", "concsious", "concept", "object", "conscious", "form", and "reason". This shapes the german idealism's idea of nothing exists without the mind. 
+```{r, warning=FALSE, echo = FALSE}
+graph = get_word_cloud(sampled, "german_idealism")
+combineWidgets(graph, width = '15cm', height='15cm')
+```
+
+## Nietzsche
+The top frequent word for Nietzsche is: "one", "will", "life", even", "man", "love", "god", "truth",which shape the idea of believing is self and science in contrast to god of Nietzsche. 
+
+```{r, warning=FALSE, echo = FALSE}
+graph = get_word_cloud(sampled, "nietzsche")
+combineWidgets(graph, width = '15cm', height='15cm')
+```
+
+
+## Stoicism
+The top frequent word for stocism is: "thing", "thou", "natur", unto", "thyself", "life", "proper", which shapes the belif of that for human beings virtue is the only good for stoicism. 
+```{r, warning=FALSE, echo = FALSE}
+graph = get_word_cloud(sampled, "stoicism")
+combineWidgets(graph, width = '15cm', height='15cm')
+```
+
+
+## Continental
+The top frequent word for continental is: "one", "form", "differ", "relate", "order", "mad", "thought", "element", which shapes the belief of self and self-consciousness, freedom, desire and the will of continental.  
+```{r, warning=FALSE, echo = FALSE}
+graph = get_word_cloud(sampled, "continental")
+combineWidgets(graph, width = '15cm', height='15cm')
+```
+
+## Aristotle
+The top frequent word for aristotle is: "differ", "become", "part", "will", "belong", which shapes the belief of that "living well' as the primary goal in human life" for aristotle. 
+```{r, warning=FALSE, echo = FALSE}
+graph = get_word_cloud(sampled, "aristotle")
+combineWidgets(graph, width = '15cm', height='15cm')
+```
+
+## Rationalism
+The top frequent word for rationlism is: "must", "can", "since", "time", "will", "bodi", "sense", "thing", "way", "much", which shapes the idea of belief of opinions and actions should be based on reason and knowledge rather than on religious belief or emotional response of rationalism. 
+```{r, warning=FALSE, echo = FALSE}
+graph = get_word_cloud(sampled, "rationalism")
+combineWidgets(graph, width = '15cm', height='15cm')
+```
+
+## Plato
+The top frequent word for plato is: "good", "man", "think", "must", "dont", "god". Which shapes plato's belief of "happiness or well-being is the highest aim of moral thought and conduct, and the virtues are the requisite skills and dispositions needed to attain it".
+```{r, warning=FALSE, echo = FALSE}
+graph = get_word_cloud(sampled, "plato")
+combineWidgets(graph, width = '15cm', height='15cm')
+```
+
+
+## Communism
+The top frequent word for communism is: "product", "labour", "work", "hour", "time", "power", "social", which shapes the idea of everyone work together, spend time and acheive better life in communism. 
+```{r, warning=FALSE, echo = FALSE}
+graph = get_word_cloud(sampled, "communism")
+combineWidgets(graph, width = '15cm', height='15cm')
+```
+
+## Phenomenology
+The top frequent word for phenomenology is: "world", "present", "exist" subject", "science", which shapes the belief of analyzing daily human behavior can provide one with a greater understanding of nature for phenomenlogy. 
+```{r, warning=FALSE, echo = FALSE}
+graph = get_word_cloud(sampled, "phenomenology")
+combineWidgets(graph, width = '15cm', height='15cm')
+```
+
+## Analytic
+The top frequent word for analytic is: "true", "realte", "theory", "mean", "fact", which shapes the idea of making use of formal logic and mathematics, and, to a lesser degree, the natural sciences for analytic. 
+```{r, warning=FALSE, echo = FALSE}
+graph = get_word_cloud(sampled, "analytic")
+combineWidgets(graph, width = '15cm', height='15cm')
+```
+
+The words "one", "exist", "thing", "man" appears frequently in almost all the schools, shaping the philiosphy idea of seek to understand fundamental truths about ourselves, as human. 
+
+# Data analysis - Emotions of each school (cluster)
+In this step we are going to look at the emotions of philisophy quotes. Among all the sampled philisophy quotes, the emotion "Trust" stood out. Trust is very important in human development, without trust the human society will not be as developed as today.
+
+```{r echo=FALSE, fig.width=6, fig.asp=0.618, out.width="50%", fig.align="default"}
+knitr::opts_chunk$set(fig.width=unit(10,"cm"), fig.height=unit(10,"cm"))
+emo.means=colMeans(select(sentence.list[-c(1:3)], anger:trust)>0.01)
+col.use=c("darkgoldenrod1", "darkgoldenrod1", "darkgoldenrod1", "darkgoldenrod1",
+            "red2", "chartreuse3", "blueviolet","dodgerblue3")
+barplot = barplot(emo.means[order(emo.means)], las=1, col=col.use[order(emo.means)], horiz=T,main = 'Philosophy Quotes')
+```
+
+I also have plotted the emotion distribution for each school. Trust and anticipation is the main emotion for all school. Some schools have more focus on the joy side and have more a joyful tone, such as empiricism, capitalism, german idealism, nietzsche, stocism, aristotle, rationalism, plato, and communism. In contrast, continental, phenomenlogy, and analytic have more emotion on sadness and fear. 
+
+```{r echo=FALSE, fig.width=6, fig.asp=0.618, out.width="50%", fig.align="default"}
+knitr::opts_chunk$set(fig.width=unit(5,"cm"), fig.height=unit(5,"cm"))
+school = c("feminism", "empiricism", "capitalism", "german_idealism", "nietzsche", "stoicism", "continental", "aristotle", "rationalism", "plato", "communism", "phenomenology", "analytic")
+for (j in 1:13) {
+  filtered.sentence.list = sentence.list[sentence.list$school == school[j],]
+  emo.means=colMeans(select(filtered.sentence.list[-c(1:3)], anger:trust)>0.01)
+  col.use=c("darkgoldenrod1", "darkgoldenrod1", "darkgoldenrod1", "darkgoldenrod1",
+            "red2", "chartreuse3", "blueviolet","dodgerblue3")
+  barplot(emo.means[order(emo.means)], las=1, col=col.use[order(emo.means)], horiz=T,main = school[j])
+}
+```
+
+I performed K-means clustering on emotion for all the 13 sampled philosophy schools. 
+```{r echo=FALSE}
+knitr::opts_chunk$set(fig.width=unit(15,"cm"), fig.height=unit(15,"cm"))
+# using mean of all emotion feature clusuter in to groups
+sentence.list.with.emtion.score <- sentence.list%>%
+  group_by(school)%>%
+  summarise(
+    anger=mean(anger),
+    anticipation=mean(anticipation),
+    disgust=mean(disgust),
+    fear=mean(fear),
+    joy=mean(joy),
+    sadness=mean(sadness),
+    surprise=mean(surprise),
+    trust=mean(trust),
+    negative=mean(negative),
+    positive=mean(positive)
+  )
+sentence.list.with.emtion.score=as.data.frame(sentence.list.with.emtion.score)
+rownames(sentence.list.with.emtion.score)=as.character((sentence.list.with.emtion.score[,1]))
+kmeans.result=kmeans(sentence.list.with.emtion.score[,-1], iter.max=200, 3)
+fviz_cluster(kmeans.result, 
+             stand=F, repel= TRUE,
+             data = sentence.list.with.emtion.score[,-1], xlab="", ylab="", xaxt="n",
+             show.clust.cent=FALSE)
+```
+
+The clustering result groups schools two 3 clusters. cluster 1 contain: "feminism", "empiricism", "capitalism", and "german idealism". cluster 2 contain: "communism", "plato", "analytic", and "phenomenology". cluster 3 contains: "nietzsche", "stoicism", "aristole", "continental" and "rationalism". School that have similar emotions or relatively closer emotions where grouped in the same cluster. Note it is interesting to see the schools that are known to have relative opposite views are not in the same cluster: capitalism(cluster1) vs. communism(cluster2), and empiricism (cluster1) vs. rationalism (cluster3). And schools with relatively similar ideas such as analytic and phenomenology are grouped together in the similar clusters. This clustering result shown us that emotions can reflect ideas in word, and help us better understand what feeling and thought each philosophy school want to address. 
+
+# Conclusion
+In this blog, we discover how different ideas of philiosophy was focused according to human history and  history events, what is the mean ideas of different school and what are the mean emotion of different schools. I believe furthur improvement could be made on clustering emotions of different authors and how does philisophy quote's emotion reflect people's feeling in the history. 
+
